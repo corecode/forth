@@ -1,3 +1,7 @@
+import io
+import re
+import binascii
+
 class ForthAsm:
     def __init__(self, output):
         self.output = output
@@ -5,15 +9,20 @@ class ForthAsm:
         self.commands = {
             ':': self.cmd_COLON,
             ';': self.cmd_SEMICOLON,
+            'CODE': self.cmd_CODE,
         }
         self.start()
 
     def quote(self, w):
-        replace = {
-            '+': '_PLUS',
-        }
-        for k,v in replace.items():
-            w = w.replace(k, v)
+        # replace = {
+        #     '+': '_PLUS',
+        # }
+        # for k,v in replace.items():
+        #     w = w.replace(k, v)
+        # return w
+        w = re.sub(r'\W', lambda s: "."+binascii.hexlify(s[0].encode("utf-8")).decode('ascii')+".", w)
+        if w[0].isdigit():
+            w = '.'+w
         return w
 
     def word(self):
@@ -37,6 +46,8 @@ class ForthAsm:
         return result
 
     def parse(self, f):
+        if not hasattr(f, 'read'):
+            f = io.StringIO(f)
         self.input = f
         while self.eval():
             pass
@@ -64,6 +75,33 @@ class ForthAsm:
     def cmd_SEMICOLON(self):
         self.exit()
 
+    def cmd_CODE(self):
+        w = self.word()
+        self.wordlist[w] = True
+        self.header(w)
+
+        code = ""
+        ch = ""
+        while True:
+            ws = ch
+            w = ""
+            while True:
+                ch = self.input.read(1)
+                if ch.isspace():
+                    if w != "":
+                        break
+                    ws += ch
+                else:
+                    w += ch
+
+            if w == "END-CODE":
+                break
+
+            code += ws
+            code += w
+
+        self.code(code)
+
 class Forth_x86(ForthAsm):
     def start(self):
         self.headers = []
@@ -74,35 +112,6 @@ class Forth_x86(ForthAsm):
 		lodsl
 		jmp *%eax
 .endm
-
-doCOLON:
-		xchgl %esp,%ebp
-		pushl %esi
-		xchgl %esp,%ebp
-		popl %esi
-		NEXT
-
-EXIT:
-		xchgl %esp,%ebp
-		popl %esi
-		xchgl %esp,%ebp
-		NEXT
-
-_LITERAL:
-		lodsl
-		pushl %eax
-		NEXT
-
-_PLUS:
-		popl %eax
-		popl %ebx
-		addl %ebx,%eax
-		pushl %eax
-		NEXT
-
-EXECUTE:
-		popl %eax
-		jmp *%eax
 
 forth_exec:
 		popl %eax                         /* return */
@@ -125,13 +134,46 @@ RSTACK:
 		.fill 64,4,0
 RSTACK_end:
 """)
+        self.parse("""
+CODE doCOLON
+		xchgl %esp,%ebp
+		pushl %esi
+		xchgl %esp,%ebp
+		popl %esi
+		NEXT
+END-CODE
+
+CODE +
+		popl %eax
+		addl %eax,(%esp)
+		NEXT
+END-CODE
+
+CODE EXIT
+		xchgl %esp,%ebp
+		popl %esi
+		xchgl %esp,%ebp
+		NEXT
+END-CODE
+
+CODE (LITERAL)
+		lodsl
+		pushl %eax
+		NEXT
+END-CODE
+
+CODE EXECUTE
+		popl %eax
+		jmp *%eax
+END-CODE
+""")
 
     def end(self):
         self.output.write("\n")
         last = "0"
         for h in reversed(self.headers):
             self.output.write("""\
-		.set %s_next, %s
+		.set .L%s_next, %s
 """ % (h, last))
             last = h+"_link"
         self.output.write("""
@@ -151,12 +193,16 @@ WORDLIST:
 		.text
 		.align 4,0
 %(sym)s_link:
-		.long %(sym)s_next
+		.long .L%(sym)s_next
 		.byte %(len)d
 		.ascii "%(name)s"
 		.align 4,0
 %(sym)s:
 """ % fields)
+
+    def code(self, code):
+        self.output.write(code)
+        self.output.write("\n")
 
     def doCOLON(self):
         self.output.write("""\
@@ -174,7 +220,7 @@ WORDLIST:
 """ % self.quote(word))
 
     def literal(self, val):
-        self.reference('_LITERAL')
+        self.reference('(LITERAL)')
         self.output.write("""\
 		.long %d
 """ % val)
