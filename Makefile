@@ -9,6 +9,6 @@ print: forth-x86.o
 clean:
 	-rm -f forth-x86.s forth-x86.o
 
-forth-x86.s: forth-asm.py
+forth-x86.s: forth-asm.py x86.s x86.fs
 	python forth-asm.py > $@
 	cat $@

@@ -106,80 +106,19 @@ class Forth_x86(ForthAsm):
     def start(self):
         self.headers = []
 
-        self.output.write("""\
-		.text
-.macro NEXT
-		lodsl
-		jmp *%eax
-.endm
-
-forth_exec:
-		popl %eax                         /* return */
-		movl $RSTACK_end,%ebp
-		xchg %esp,%ebp
-		pushl %eax
-		xchg %esp,%ebp
-		movl %ebp,%esi
-		jmp EXECUTE
-
-.global _start
-_start:
-		pushl $a12
-		call forth_exec
-		jmp _start
-
-		.data
-		.align 4,0
-RSTACK:
-		.fill 64,4,0
-RSTACK_end:
-""")
-        self.parse("""
-CODE doCOLON
-		xchgl %esp,%ebp
-		pushl %esi
-		xchgl %esp,%ebp
-		popl %esi
-		NEXT
-END-CODE
-
-CODE +
-		popl %eax
-		addl %eax,(%esp)
-		NEXT
-END-CODE
-
-CODE EXIT
-		xchgl %esp,%ebp
-		popl %esi
-		xchgl %esp,%ebp
-		NEXT
-END-CODE
-
-CODE (LITERAL)
-		lodsl
-		pushl %eax
-		NEXT
-END-CODE
-
-CODE EXECUTE
-		popl %eax
-		jmp *%eax
-END-CODE
-""")
+        self.output.write(open('x86.s').read())
+        self.parse(open('x86.fs'))
 
     def end(self):
         self.output.write("\n")
         last = "0"
         for h in reversed(self.headers):
             self.output.write("""\
-		.set .L%s_next, %s
+	.set .L%s_next, %s
 """ % (h, last))
             last = h+"_link"
-        self.output.write("""
-		.data
-WORDLIST:
-		.long %s
+        self.output.write("""\
+	.set corewords, %s
 """ % last)
 
     def header(self, name, immediate=False):
@@ -190,13 +129,13 @@ WORDLIST:
         }
         self.headers.append(fields['sym'])
         self.output.write("""
-		.text
-		.align 4,0
+	.text
+	.align 4,0
 %(sym)s_link:
-		.long .L%(sym)s_next
-		.byte %(len)d
-		.ascii "%(name)s"
-		.align 4,0
+	.long .L%(sym)s_next
+	.byte %(len)d
+	.ascii "%(name)s"
+	.align 4,0
 %(sym)s:
 """ % fields)
 
@@ -206,23 +145,23 @@ WORDLIST:
 
     def doCOLON(self):
         self.output.write("""\
-		call doCOLON
+	call doCOLON
 """)
 
     def exit(self):
         self.output.write("""\
-		.long EXIT
+	.long EXIT
 """)
 
     def reference(self, word):
         self.output.write("""\
-		.long %s
+	.long %s
 """ % self.quote(word))
 
     def literal(self, val):
         self.reference('(LITERAL)')
         self.output.write("""\
-		.long %d
+	.long %d
 """ % val)
 
 if __name__ == "__main__":
