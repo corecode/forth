@@ -141,7 +141,15 @@ CODE =
         NEXT
 END-CODE
 
-: =0 0 = ;
+CODE 0=
+	popl %eax
+	subl %ebx,%ebx
+        orl %eax,%eax
+	setneb %bl
+        decl %ebx
+        movl %ebx,(%esp)
+        NEXT
+END-CODE
 
 CODE >
 	popl %eax
@@ -343,7 +351,7 @@ END-CODE
 ; IMMEDIATE
 
 : UNTIL ( dest -- )
-  POSTPONE =0 POSTPONE 0BRANCH ,
+  POSTPONE 0= POSTPONE 0BRANCH ,
 ; IMMEDIATE
 
 : AHEAD ( -- orig )
