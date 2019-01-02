@@ -5,25 +5,17 @@ import binascii
 class ForthAsm:
     def __init__(self, output):
         self.output = output
-        self.wordlist = {}
+        self.wordlist = []
         self.commands = {
             ':': self.cmd_COLON,
             ';': self.cmd_SEMICOLON,
             'CODE': self.cmd_CODE,
+            '(': self.cmd_PAREN,
+            '\\': self.cmd_BACKSLASH,
+            'IMMEDIATE': self.cmd_IMMEDIATE,
+            'VARIABLE': self.cmd_VARIABLE,
         }
         self.start()
-
-    def quote(self, w):
-        # replace = {
-        #     '+': '_PLUS',
-        # }
-        # for k,v in replace.items():
-        #     w = w.replace(k, v)
-        # return w
-        w = re.sub(r'\W', lambda s: "."+binascii.hexlify(s[0].encode("utf-8")).decode('ascii')+".", w)
-        if w[0].isdigit():
-            w = '.'+w
-        return w
 
     def word(self):
         while True:
@@ -66,20 +58,34 @@ class ForthAsm:
                 self.reference(w)
         return True
 
+    def cmd_PAREN(self):
+        while True:
+            w = self.word()
+            if w == ")":
+                break
+
+    def cmd_BACKSLASH(self):
+        while True:
+            ch = self.input.read(1)
+            if ch == '\n':
+                break
+
     def cmd_COLON(self):
         w = self.word()
-        self.wordlist[w] = True
+        self.wordlist.append(w)
         self.header(w)
-        self.doCOLON()
+        self.enter()
 
     def cmd_SEMICOLON(self):
         self.exit()
 
     def cmd_CODE(self):
         w = self.word()
-        self.wordlist[w] = True
+        self.wordlist.append(w)
         self.header(w)
+        self.assemble()
 
+    def assemble(self):
         code = ""
         ch = ""
         while True:
@@ -102,17 +108,44 @@ class ForthAsm:
 
         self.code(code)
 
+    def cmd_IMMEDIATE(self):
+        self.immediate()
+
+    def cmd_VARIABLE(self):
+        w = self.word()
+        self.wordlist.append(w)
+        self.header(w)
+        self.variable(w)
+
 class Forth_x86(ForthAsm):
+    def quote(self, w):
+        w = re.sub(r'\W', lambda s: "."+binascii.hexlify(s[0].encode("utf-8")).decode('ascii')+".", w)
+        if w[0].isdigit():
+            w = '.'+w
+        return w
+
     def start(self):
         self.headers = []
+        self.immediates = {}
 
         self.output.write(open('x86.s').read())
         self.parse(open('x86.fs'))
 
     def end(self):
         self.output.write("\n")
+        for name in self.wordlist:
+            fields = {
+                'sym': self.quote(name),
+                'len': len(name) | (0x80 if name in self.immediates else 0),
+            }
+            self.output.write("""\
+	.set %(sym)s_len, %(len)d
+""" % fields)
+
+        self.output.write("\n")
         last = "0"
         for h in reversed(self.headers):
+
             self.output.write("""\
 	.set .L%s_next, %s
 """ % (h, last))
@@ -121,10 +154,10 @@ class Forth_x86(ForthAsm):
 	.set corewords, %s
 """ % last)
 
-    def header(self, name, immediate=False):
+    def header(self, name):
         fields = {
             'sym': self.quote(name),
-            'len': len(name) | (0x80 if immediate else 0),
+            'len': len(name),
             'name': name,
         }
         self.headers.append(fields['sym'])
@@ -133,19 +166,23 @@ class Forth_x86(ForthAsm):
 	.align 4,0
 %(sym)s_link:
 	.long .L%(sym)s_next
-	.byte %(len)d
+	.byte %(sym)s_len
 	.ascii "%(name)s"
 	.align 4,0
 %(sym)s:
 """ % fields)
 
+    def immediate(self):
+        name = self.wordlist[-1]
+        self.immediates[name] = True
+
     def code(self, code):
         self.output.write(code)
         self.output.write("\n")
 
-    def doCOLON(self):
+    def enter(self):
         self.output.write("""\
-	call doCOLON
+	call ENTER
 """)
 
     def exit(self):
@@ -164,10 +201,16 @@ class Forth_x86(ForthAsm):
 	.long %d
 """ % val)
 
+    def variable(self, name):
+        sym = self.quote(name)
+        self.output.write("""
+.data
+%s_data:
+	.long 0
+""" % sym)
+
 if __name__ == "__main__":
     import sys
     import io
     f = Forth_x86(sys.stdout)
-    f.parse(io.StringIO(": a2 2 + ; : a12 1 a2 ;"))
     f.end()
-    #f.header("test")
