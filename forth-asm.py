@@ -61,13 +61,13 @@ class ForthAsm:
     def cmd_PAREN(self):
         while True:
             w = self.word()
-            if w == ")":
+            if w == "" or w == ")":
                 break
 
     def cmd_BACKSLASH(self):
         while True:
             ch = self.input.read(1)
-            if ch == '\n':
+            if ch == '\n' or ch == "":
                 break
 
     def cmd_COLON(self):
@@ -93,6 +93,8 @@ class ForthAsm:
             w = ""
             while True:
                 ch = self.input.read(1)
+                if ch == "":
+                    return
                 if ch.isspace():
                     if w != "":
                         break
@@ -204,10 +206,13 @@ class Forth_x86(ForthAsm):
     def variable(self, name):
         sym = self.quote(name)
         self.output.write("""
+	pushl $%(sym)s_data
+	NEXT
+
 .data
-%s_data:
+%(sym)s_data:
 	.long 0
-""" % sym)
+""" % {'sym': sym} )
 
 if __name__ == "__main__":
     import sys

@@ -21,6 +21,11 @@ CODE DROP
         NEXT
 END-CODE
 
+CODE 2DROP
+	leal 8(%esp),%esp
+        NEXT
+END-CODE
+
 CODE RDROP
 	leal 4(%ebp),%ebp
 	NEXT
@@ -58,6 +63,12 @@ END-CODE
 
 CODE R@
 	pushl (%ebp)
+	NEXT
+END-CODE
+
+CODE RPICK
+	popl %eax
+	pushl (%ebp,%eax,4)
 	NEXT
 END-CODE
 
@@ -123,6 +134,12 @@ END-CODE
 CODE AND
 	popl %eax
 	andl %eax,(%esp)
+	NEXT
+END-CODE
+
+CODE OR
+	popl %eax
+	orl %eax,(%esp)
 	NEXT
 END-CODE
 
@@ -241,24 +258,22 @@ CODE C,
         NEXT
 END-CODE
 
-CODE CMPWORD /* c-addr1 w-addr2 */
-	movl %esi,%ebx
-        popl %esi
-        popl %edi
-        lodsb
-        andl $0x7f,%eax
-        movzbl (%edi),%ecx
-        cmpl %ecx,%eax
-        jne .L2f
-        incl %edi
-        rep cmpsb
-.L2f:	setne %al
-	andl $1,%eax
-        decl %eax
-	pushl %eax
-        movl %ebx,%esi
-	NEXT
-END-CODE
+: CMPWORD ( addr len waddr -- f )
+  DUP C@ 127 AND ( addr len waddr len2 )
+  ROT DUP >R ( addr waddr len2 len / R: len )
+  - IF ( addr waddr )
+    RDROP 2DROP 0 EXIT ( 0 / R: )
+  THEN
+  1+ ( addr1 addr2 )
+  R> 0 DO
+    2DUP I + C@ ( addr1 addr2 addr1 c2 )
+    SWAP I + C@ ( addr1 addr2 c2 c1 )
+    - IF ( addr1 addr2 )
+      UNLOOP 2DROP 0 LEAVE
+    THEN
+  LOOP
+  2DROP 1
+;
 
 : ALIGNED ( addr -- addr )
   1 CELLS + 1- 1 CELLS INVERT AND
@@ -272,21 +287,21 @@ END-CODE
   DUP C@ 127 AND + ALIGNED
 ;
 
-: FIND ( c-addr -- c-addr 0 | xt 1 | xt -1 )
-  DUP ( c-addr1 c-addr1 )
-  LAST >R ( c-addr1 c-addr1 ) ( R: addr2 )
+: FIND ( addr len -- addr len 0 | xt 1 | xt -1 )
+  2DUP ( addr len addr len )
+  LAST >R ( R: addr2 )
   BEGIN
-    R> @ DUP >R ( c-addr1 c-addr1 addr2 ) ( R: addr2 )
+    R> @ DUP >R ( addr len addr len addr2 )
   WHILE
-    R@ 1 CELLS + ( c-addr1 c-addr1 c-addr2 ) ( R: addr2 )
-    CMPWORD IF
-      DROP R> DUP XT> SWAP 1 CELLS + C@ ( xt len+flags ) ( R: )
+    R@ 1 CELLS + ( addr len addr len c-addr2 )
+    CMPWORD IF ( addr len )
+      2DROP R> DUP XT> SWAP 1 CELLS + C@ ( xt len+flags ) ( R: )
       DUP 128 AND IF 1 ELSE -1 THEN ( xt -1 | xt 1 )
       EXIT
     THEN
-    DUP
+    2DUP
   REPEAT
-  R> DROP 0 ( c-addr 0 ) ( R: )
+  R> 2DROP 0 ( addr len 0 ) ( R: )
 ;
 
 : DOES>
@@ -309,9 +324,11 @@ END-CODE
 
 VARIABLE DP
 VARIABLE STATE
-0 STATE !
 
-: ; POSTPONE [ ;
+: ; ( xt -- )
+  LAST !
+  [
+; IMMEDIATE
 
 : [ STATE 1 ! ; IMMEDIATE
 : ] STATE 0 ! ;
@@ -404,6 +421,10 @@ END-CODE
   = ( f )
 ;
 
+: I ( -- n / R: idx lim )
+  1 RPICK
+;
+
 : UNLOOP
   RDROP RDROP
 ;
@@ -440,8 +461,38 @@ END-CODE
   - ( addr len )
 ;
 
+: EVALUATE ( source n -- )
+  SOURCELEN ! SOURCEBUF !
+  0 >IN !
+  BEGIN >IN @ SOURCELEN @ < WHILE
+    PARSE 2DUP ( addr len )
+    FIND DUP IF ( xt 1 | xt -1 )
+      0 > STATE @ OR IF ( xt )
+        EXECUTE
+      ELSE
+        COMPILE,
+      THEN
+    ELSE ( addr len 0 )
+      DROP >NUMBER
+    THEN
+  REPEAT
+;
+
+: >NUMBER ( addr len -- n )
+  SWAP >R ( len / R: addr )
+  0 SWAP ( 0 len )
+  0 DO ( n )
+    10 *
+    R@ I + C@ 48 - +
+  LOOP
+  RDROP
+;
+
 VARIABLE >IN
 VARIABLE SOURCEBUF
 VARIABLE SOURCELEN
 
 : SOURCE SOURCEBUF SOURCELEN ;
+
+VARIABLE UP
+VARIABLE LAST

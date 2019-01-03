@@ -1,14 +1,21 @@
-ASFLAGS=-32 -acghlmns
+ASFLAGS=-32
+CFLAGS=-m32 -g
+LDFLAGS=-m32
 
-all: assemble print
+# -acghlmns
+
+all: assemble forth-x86
+
+forth-x86: main.o forth-x86.o
+	$(LINK.o) -o $@ $^
 
 assemble: forth-x86.o
 
 print: forth-x86.o
+	cat forth-x86.s
 	objdump -rsd $^
 clean:
-	-rm -f forth-x86.s forth-x86.o
+	-rm -f forth-x86.s forth-x86.o forth-x86 main.o
 
 forth-x86.s: forth-asm.py x86.s x86.fs
 	python forth-asm.py > $@
-	cat $@
