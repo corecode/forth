@@ -6,6 +6,9 @@ class ForthAsm:
     def __init__(self, output):
         self.output = output
         self.wordlist = []
+        self.immediates = []
+        self.referenced = set()
+        self.ctrl_stack = []
         self.commands = {
             ':': self.cmd_COLON,
             ';': self.cmd_SEMICOLON,
@@ -14,6 +17,20 @@ class ForthAsm:
             '\\': self.cmd_BACKSLASH,
             'IMMEDIATE': self.cmd_IMMEDIATE,
             'VARIABLE': self.cmd_VARIABLE,
+            'POSTPONE': self.cmd_POSTPONE,
+            'BEGIN': self.cmd_BEGIN,
+            'WHILE': self.cmd_WHILE,
+            'IF': self.cmd_IF,
+            'THEN': self.cmd_THEN,
+            'AGAIN': self.cmd_AGAIN,
+            'REPEAT': self.cmd_REPEAT,
+            'ELSE': self.cmd_ELSE,
+            'AHEAD': self.cmd_AHEAD,
+            'DO': self.cmd_DO,
+            'LOOP': self.cmd_LOOP,
+            '+LOOP': self.cmd_PLUS_LOOP,
+            'UNTIL': self.cmd_UNTIL,
+            '[\']': self.cmd_BRACKET_TICK,
         }
         self.start()
 
@@ -53,9 +70,15 @@ class ForthAsm:
         else:
             try:
                 v = int(w)
-                self.literal(v)
+                self.literal(w)
+                return True
             except ValueError:
-                self.reference(w)
+                pass
+
+            if w in self.immediates:
+                raise RuntimeError("Implement %s in meta-compiler" % w) from None
+            self.referenced.add(w)
+            self.reference(w)
         return True
 
     def cmd_PAREN(self):
@@ -74,10 +97,12 @@ class ForthAsm:
         w = self.word()
         self.wordlist.append(w)
         self.header(w)
+        self.state = 1
         self.enter()
 
     def cmd_SEMICOLON(self):
         self.exit()
+        self.state = 0
 
     def cmd_CODE(self):
         w = self.word()
@@ -111,6 +136,10 @@ class ForthAsm:
         self.code(code)
 
     def cmd_IMMEDIATE(self):
+        w = self.wordlist[-1]
+        if w in self.referenced:
+            raise RuntimeError("implement %s in the meta-compiler" % w)
+        self.immediates.append(w)
         self.immediate()
 
     def cmd_VARIABLE(self):
@@ -118,6 +147,78 @@ class ForthAsm:
         self.wordlist.append(w)
         self.header(w)
         self.variable(w)
+
+    def cmd_POSTPONE(self):
+        w = self.word()
+        if w in self.immediates:
+            self.reference(w)
+        else:
+            self.literal(w)
+            self.reference('COMPILE,')
+
+    def cmd_BEGIN(self):
+        self.rec_jmp_dest()
+
+    def cmd_WHILE(self):
+        self.cmd_IF()
+        self.cs_roll(1)
+
+    def cs_roll(self, n):
+        t = self.ctrl_stack[-n-1:]
+        t2 = t[n:] + t[:n]
+        self.ctrl_stack[-n-1:] = t2
+
+    def cmd_IF(self):
+        self.reference('0BRANCH')
+        self.rec_jmp_orig()
+
+    def cmd_AGAIN(self):
+        self.reference('BRANCH')
+        self.res_jmp_dest()
+
+    def cmd_THEN(self):
+        self.res_jmp_orig()
+
+    def cmd_REPEAT(self):
+        self.cmd_AGAIN()
+        self.cmd_THEN()
+
+    def cmd_ELSE(self):
+        self.cmd_AHEAD()
+        self.cs_roll(1)
+        self.cmd_THEN()
+
+    def cmd_AHEAD(self):
+        self.reference('BRANCH')
+        self.rec_jmp_orig()
+
+    def cmd_DO(self):
+        self.reference('(LITERAL)')
+        self.rec_jmp_orig()
+        self.reference('>R')
+
+        self.reference('>R')
+        self.reference('>R')
+        self.cmd_BEGIN()
+
+    def cmd_LOOP(self):
+        self.literal(1)
+        self.cmd_PLUS_LOOP()
+
+    def cmd_PLUS_LOOP(self):
+        self.reference('(+LOOP)')
+        self.cmd_UNTIL()
+        self.reference('UNLOOP')
+        self.cmd_THEN()
+
+    def cmd_UNTIL(self):
+        self.reference('0BRANCH')
+        self.res_jmp_dest()
+
+    def cmd_BRACKET_TICK(self):
+        w = self.word()
+        self.literal(w)
+
 
 class Forth_x86(ForthAsm):
     def quote(self, w):
@@ -128,7 +229,7 @@ class Forth_x86(ForthAsm):
 
     def start(self):
         self.headers = []
-        self.immediates = {}
+        self.ctrl_pos = 0
 
         self.output.write(open('x86.s').read())
         self.parse(open('x86.fs'))
@@ -176,7 +277,6 @@ class Forth_x86(ForthAsm):
 
     def immediate(self):
         name = self.wordlist[-1]
-        self.immediates[name] = True
 
     def code(self, code):
         self.output.write(code)
@@ -199,8 +299,14 @@ class Forth_x86(ForthAsm):
 
     def literal(self, val):
         self.reference('(LITERAL)')
+        try:
+            int(val)
+            val = str(val)
+        except ValueError:
+            val = self.quote(val)
+
         self.output.write("""\
-	.long %d
+	.long %s
 """ % val)
 
     def variable(self, name):
@@ -212,7 +318,32 @@ class Forth_x86(ForthAsm):
 .data
 %(sym)s_data:
 	.long 0
-""" % {'sym': sym} )
+""" % {'name': name, 'sym': sym} )
+
+    def rec_jmp_dest(self):
+        self.output.write("""\
+.Lb%d:
+""" % self.ctrl_pos)
+        self.ctrl_stack.append(self.ctrl_pos)
+        self.ctrl_pos += 1
+
+    def res_jmp_dest(self):
+        self.output.write("""\
+	.long .Lb%(dest)d
+""" % {'dest': self.ctrl_stack.pop()})
+
+    def rec_jmp_orig(self):
+        self.output.write("""\
+	.long .Lb%(pos)d_dest
+""" % {'pos': self.ctrl_pos})
+        self.ctrl_stack.append(self.ctrl_pos)
+        self.ctrl_pos += 1
+
+    def res_jmp_orig(self):
+        self.output.write("""\
+.Lb%(orig)d_dest:
+""" % {'orig': self.ctrl_stack.pop()})
+
 
 if __name__ == "__main__":
     import sys

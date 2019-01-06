@@ -214,17 +214,18 @@ CODE EXECUTE
 	jmp *%eax
 END-CODE
 
-: WORD,
-  DUP C@ ( c-addr len )
-  -1 SWAP ( c-addr -1 len )
-  DO ( c-addr )
+: WORD, ( addr len -- )
+  DUP C,
+  0 DO ( addr )
     DUP C@ C,
     1+
   LOOP
+  DROP ( )
 ;
 
 : CODE, ( xt -- )
-  232 C, \ 232 = 0xE8 = call
+  232 C, \ 232 = 0xE8 = call relative
+  HERE 4 + -
   , \ xt
 ;
 
@@ -233,28 +234,31 @@ CODE doCREATE
 	NEXT
 END-CODE
 
-: CREATE
+: CREATE, ( -- nlink )
   ALIGN HERE ( nlink )
   LAST @ , ( nlink H: next )
-  PARSE WORD,
-  ALIGN HERE ( nlink xt )
-  ' doCREATE CODE,
+  PARSE WORD, ALIGN ( H: next | name )
+;
+
+: CREATE
+  CREATE,
+  ['] doCREATE CODE,
   POSTPONE EXIT
 ;
 
 CODE ,
 	popl %eax
-	movl UP,%ebx
+	movl UP_data,%ebx
         movl %eax,(%ebx)
-	addl $4,UP
+	addl $4,UP_data
 	NEXT
 END-CODE
 
 CODE C,
 	popl %eax
-	movl UP,%ebx
+	movl UP_data,%ebx
         movb %al,(%ebx)
-        incl UP
+        incl UP_data
         NEXT
 END-CODE
 
@@ -269,14 +273,17 @@ END-CODE
     2DUP I + C@ ( addr1 addr2 addr1 c2 )
     SWAP I + C@ ( addr1 addr2 c2 c1 )
     - IF ( addr1 addr2 )
-      UNLOOP 2DROP 0 LEAVE
+      UNLOOP 2DROP 0 EXIT
     THEN
   LOOP
   2DROP 1
 ;
 
 : ALIGNED ( addr -- addr )
-  1 CELLS + 1- 1 CELLS INVERT AND
+  1 CELLS 1- ( addr 3 )
+  DUP INVERT ( addr 3 ~3 )
+  SWAP ROT ( ~3 3 addr )
+  + AND
 ;
 
 : ALIGN
@@ -284,7 +291,8 @@ END-CODE
 ;
 
 : XT> ( addr -- xt )
-  DUP C@ 127 AND + ALIGNED
+  1 CELLS + ( cstr )
+  DUP C@ 127 AND + 1+ ALIGNED
 ;
 
 : FIND ( addr len -- addr len 0 | xt 1 | xt -1 )
@@ -295,49 +303,56 @@ END-CODE
   WHILE
     R@ 1 CELLS + ( addr len addr len c-addr2 )
     CMPWORD IF ( addr len )
-      2DROP R> DUP XT> SWAP 1 CELLS + C@ ( xt len+flags ) ( R: )
-      DUP 128 AND IF 1 ELSE -1 THEN ( xt -1 | xt 1 )
+      2DROP R> DUP ( addr addr ) ( R: )
+      XT> SWAP ( xt addr )
+      1 CELLS + ( xt c-addr )
+      C@ ( xt len+flags )
+      128 AND IF 1 ELSE -1 THEN ( xt -1 | xt 1 )
       EXIT
     THEN
-    2DUP
+    2DUP ( addr len addr len )
   REPEAT
-  R> 2DROP 0 ( addr len 0 ) ( R: )
+  RDROP 2DROP 0 ( addr len 0 ) ( R: )
 ;
 
 : DOES>
+  \ XXX wrong
   R> ( xt )
-  HERE 1 CELLS - !
-; IMMEDIATE
+  HERE 1 CELLS - ! ( overwrite jump address )
+;
 
-: : CREATE ]
-
+: :
+  CREATE,
+  ['] ENTER CODE,
+  ]
 ;
 
 : CELLS ( n -- n ) 4 * ;
-: ALLOT ( n -- ) DP +! ;
+: ALLOT ( n -- ) UP +! ;
 
 : VARIABLE
   CREATE 1 CELLS ALLOT ,
 ;
 
-: HERE DP @ ;
-
-VARIABLE DP
+VARIABLE UP
+VARIABLE LAST
 VARIABLE STATE
+: [ 0 STATE ! ; IMMEDIATE
+: ] 1 STATE ! ;
+: HERE UP @ ;
 
 : ; ( xt -- )
+  POSTPONE EXIT
   LAST !
-  [
+  POSTPONE [
 ; IMMEDIATE
 
-: [ STATE 1 ! ; IMMEDIATE
-: ] STATE 0 ! ;
 
 CODE 0BRANCH
 	lodsl
 	popl %ebx
 	testl %ebx,%ebx
-	jz .L1f
+	jnz .L1f
         movl %eax,%esi
 .L1f:
 	NEXT
@@ -368,7 +383,7 @@ END-CODE
 ; IMMEDIATE
 
 : UNTIL ( dest -- )
-  POSTPONE 0= POSTPONE 0BRANCH ,
+  POSTPONE 0BRANCH ,
 ; IMMEDIATE
 
 : AHEAD ( -- orig )
@@ -399,9 +414,10 @@ END-CODE
   POSTPONE BEGIN
 ; IMMEDIATE
 
-: LEAVE ( 0 orig1 -- 0 orig2 orig1 )
-  >R POSTPONE AHEAD >R
-; IMMEDIATE
+: LEAVE ( R: loopend idx lim ret )
+  RDROP RDROP RDROP ( R: loopend )
+  \ now returns to loopend
+;
 
 : LOOP POSTPONE 1 POSTPONE +LOOP ; IMMEDIATE
 
@@ -415,21 +431,24 @@ END-CODE
   POSTPONE UNLOOP
 ; IMMEDIATE
 
-: (+LOOP) ( n -- / R: idx lim )
-  R> R> ROT + ( lim nidx R: )
-  2DUP >R >R ( lim idx R: idx lim )
-  = ( f )
+: (+LOOP) ( n -- / R: loopend idx lim ret )
+  R> SWAP ( ret n )
+  R> R> ( ret n lim idx / R: loopend )
+  ROT + ( ret lim newidx )
+  2DUP >R >R ( ret lim idx R: loopend idx lim )
+  = ( ret f )
+  SWAP >R ( f / R: loopend idx lim ret )
 ;
 
 : I ( -- n / R: idx lim )
-  1 RPICK
+  2 RPICK
 ;
 
 : UNLOOP
-  RDROP RDROP
+  R> RDROP RDROP RDROP >R
 ;
 
-: ' PARSE FIND DROP ; IMMEDIATE
+: ' PARSE FIND DROP ;
 : ['] PARSE FIND LITERAL ; IMMEDIATE
 
 : LITERAL POSTPONE (LITERAL) , ;
@@ -442,11 +461,15 @@ END-CODE
 
 : PARSE-CH
   >R
-  BEGIN SOURCE >IN @ >
-        >IN @ + C@
-        R@ EXECUTE AND WHILE
-    >IN 1 +!
+  BEGIN SOURCELEN @ ( len )
+        >IN @ SWAP < ( f )
+  WHILE SOURCEBUF @ ( addr )
+        >IN @ + C@ ( ch )
+        R@ EXECUTE ( f )
+  WHILE
+    1 >IN +!
   REPEAT
+  THEN \ close second WHILE
   RDROP
 ;
 
@@ -455,9 +478,9 @@ END-CODE
 
 : PARSE ( -- addr len )
   ['] IS-WS? PARSE-CH
-  SOURCE DROP >IN @ DUP >R - ( addr R: startpos )
+  SOURCE DROP >IN @ DUP >R + ( addr R: startpos )
   ['] NOT-WS? PARSE-CH
-  >IN @ R> SWAP ( addr endpos startpos )
+  >IN @ R> ( addr endpos startpos )
   - ( addr len )
 ;
 
@@ -465,34 +488,35 @@ END-CODE
   SOURCELEN ! SOURCEBUF !
   0 >IN !
   BEGIN >IN @ SOURCELEN @ < WHILE
-    PARSE 2DUP ( addr len )
+    PARSE ( addr len )
     FIND DUP IF ( xt 1 | xt -1 )
-      0 > STATE @ OR IF ( xt )
-        EXECUTE
-      ELSE
+      0 < STATE @ AND IF ( xt )
         COMPILE,
+      ELSE
+        EXECUTE
       THEN
     ELSE ( addr len 0 )
       DROP >NUMBER
+      STATE @ IF
+        LITERAL
+      THEN
     THEN
   REPEAT
 ;
 
 : >NUMBER ( addr len -- n )
-  SWAP >R ( len / R: addr )
-  0 SWAP ( 0 len )
-  0 DO ( n )
-    10 *
-    R@ I + C@ 48 - +
+  0 SWAP ( addr 0 len )
+  0 DO ( addr sum )
+    10 * SWAP ( sum addr )
+    DUP 1+ SWAP ( sum addrnext addr )
+    C@ 48 - ( sum addr n )
+    ROT + ( addr sum )
   LOOP
-  RDROP
+  SWAP DROP
 ;
 
 VARIABLE >IN
 VARIABLE SOURCEBUF
 VARIABLE SOURCELEN
 
-: SOURCE SOURCEBUF SOURCELEN ;
-
-VARIABLE UP
-VARIABLE LAST
+: SOURCE SOURCEBUF @ SOURCELEN @ ;

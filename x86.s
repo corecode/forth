@@ -15,15 +15,15 @@ forth_run:
 	pushl %ebp
 	movl %esp,STACK
 	movl $RSTACK_end,%ebp
-	leal -4(%ebp),%ebp /* store return address */
-	movl $1f,(%ebp)
+	movl $1f,%esi /* return address */
 	pushl 8(%esp)
 	pushl 16(%esp)
 	pushl $EVALUATE
 	jmp EXECUTE
-1:	movl STACK,%esp
+2:	movl STACK,%esp
 	popl %ebp
 	ret
+1:	.long 2b
 
         .bss
 	.align 4,0

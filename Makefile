@@ -1,6 +1,6 @@
-ASFLAGS=-32
-CFLAGS=-m32 -g
-LDFLAGS=-m32
+ASFLAGS+=-32 -g --gen-debug
+CFLAGS+=-m32 -g
+LDFLAGS+=-m32 -g
 
 # -acghlmns
 
