@@ -10,6 +10,11 @@ CODE DUP
         NEXT
 END-CODE
 
+CODE OVER
+	pushl 4(%esp)
+	NEXT
+END-CODE
+
 CODE 2DUP
 	pushl 4(%esp)
 	pushl 4(%esp)
@@ -157,9 +162,8 @@ CODE =
 END-CODE
 
 CODE 0=
-	popl %eax
 	subl %ebx,%ebx
-        orl %eax,%eax
+        orl %ebx,(%esp)
 	setneb %bl
         decl %ebx
         movl %ebx,(%esp)
@@ -312,22 +316,22 @@ END-CODE
   POSTPONE THEN ( )
 ; IMMEDIATE
 
-: (DO) ( idx lim loopend -- / R: ret -- loopend lim idx ret )
-  R> ( idx lim loopend ret / R: )
-  SWAP >R ( idx lim ret / R: loopend )
-  SWAP >R ( idx ret / R: loopend lim )
-  SWAP >R ( ret / R: loopend lim idx )
-  >R ( / R: loopend lim idx ret )
+: (DO) ( lim idx loopend -- / R: ret -- loopend idx lim ret )
+  R> ( lim idx loopend ret / R: )
+  SWAP >R ( lim idx ret / R: loopend )
+  SWAP >R ( lim ret / R: loopend idx )
+  SWAP >R ( ret / R: loopend idx lim )
+  >R ( / R: loopend idx lim ret )
 ;
 
-: DO ( -- orig dest / exe: loopend lim idx -- )
+: DO ( C: -- orig dest / lim idx -- / R: -- loopend idx lim )
   POSTPONE (LITERAL)
   HERE 0 ,
   POSTPONE (DO)
   POSTPONE BEGIN
 ; IMMEDIATE
 
-: (?DO) ( R: loopend lim idx ret )
+: (?DO) ( R: loopend idx lim ret )
   R> ( ret / R: loopend lim idx )
   R> R> 2DUP >R >R ( ret lim idx / R: loopend lim idx )
   = IF ( ret )
@@ -336,7 +340,7 @@ END-CODE
   >R ( / R: ret/loopend )
 ;
 
-: ?DO ( -- orig dest / exe: loopend lim idx -- )
+: ?DO ( C: -- orig dest / lim idx -- / R: loopend idx lim )
   POSTPONE (LITERAL)
   HERE 0 ,
   POSTPONE (DO)
@@ -519,14 +523,29 @@ END-CODE
 ; IMMEDIATE
 
 : >NUMBER ( addr len -- n )
-  0 SWAP ( addr 0 len )
+  DUP 0= IF
+    2DROP 0 EXIT
+  THEN
+
+  \ check for minus
+  SWAP DUP C@ ( len addr ch )
+  45 = IF ( len addr )
+    1+ SWAP 1- ( addr len )
+    -1 ( addr len fact )
+  ELSE
+    SWAP ( addr len )
+    1 ( addr len fact )
+  THEN >R ( addr len / R: fact )
+
+  0 ( addr len sum )
+  SWAP ( addr sum len )
   0 DO ( addr sum )
     10 * SWAP ( sum addr )
     DUP 1+ SWAP ( sum addrnext addr )
     C@ 48 - ( sum addr n )
     ROT + ( addr sum )
   LOOP
-  SWAP DROP
+  SWAP DROP R> * ( n / R: )
 ;
 
 : EVALUATE ( source n -- )
