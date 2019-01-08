@@ -93,6 +93,10 @@ class ForthAsm:
         self.words[self.wordlist[-1]].append(w)
         self.reference(w)
 
+    def literal(self, val):
+        self.compile_comma('(LITERAL)')
+        self.compile_comma(val)
+
     def execute(self, w):
         if w in self.immediate_commands:
             self.comment("IMMEDATE %s" % w)
@@ -174,8 +178,6 @@ class ForthAsm:
 
     def cmd_IMMEDIATE(self):
         w = self.wordlist[-1]
-        # if w in self.referenced:
-        #     raise RuntimeError("implement %s in the meta-compiler" % w)
         self.immediates.append(w)
         self.immediate()
 
@@ -194,7 +196,7 @@ class ForthAsm:
             self.literal(w)
             self.compile_comma('COMPILE,')
         else:
-            raise RuntimeError("unknown word %s" % w)
+            raise RuntimeError("unknown word %s" % w) from None
 
     def cmd_BRACKET_TICK(self):
         w = self.word()
@@ -323,19 +325,6 @@ class Forth_x86(ForthAsm):
         self.output.write("""\
 	.long %s
 """ % s)
-
-    def literal(self, val):
-        self.compile_comma('(LITERAL)')
-        self.compile_comma(val)
-#         try:
-#             int(val)
-#             val = str(val)
-#         except ValueError:
-#             val = self.quote(val)
-
-#         self.output.write("""\
-# 	.long %s
-# """ % val)
 
     def variable(self, name):
         sym = self.quote(name)
