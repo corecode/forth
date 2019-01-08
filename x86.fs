@@ -312,10 +312,35 @@ END-CODE
   POSTPONE THEN ( )
 ; IMMEDIATE
 
+: (DO) ( idx lim loopend -- / R: ret -- loopend lim idx ret )
+  R> ( idx lim loopend ret / R: )
+  SWAP >R ( idx lim ret / R: loopend )
+  SWAP >R ( idx ret / R: loopend lim )
+  SWAP >R ( ret / R: loopend lim idx )
+  >R ( / R: loopend lim idx ret )
+;
+
 : DO ( -- orig dest / exe: loopend lim idx -- )
   POSTPONE (LITERAL)
-  HERE 0 , POSTPONE >R
-  POSTPONE >R POSTPONE >R
+  HERE 0 ,
+  POSTPONE (DO)
+  POSTPONE BEGIN
+; IMMEDIATE
+
+: (?DO) ( R: loopend lim idx ret )
+  R> ( ret / R: loopend lim idx )
+  R> R> 2DUP >R >R ( ret lim idx / R: loopend lim idx )
+  = IF ( ret )
+    DROP RDROP RDROP R> ( loopend / R: )
+  THEN
+  >R ( / R: ret/loopend )
+;
+
+: ?DO ( -- orig dest / exe: loopend lim idx -- )
+  POSTPONE (LITERAL)
+  HERE 0 ,
+  POSTPONE (DO)
+  POSTPONE (?DO)
   POSTPONE BEGIN
 ; IMMEDIATE
 
