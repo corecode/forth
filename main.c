@@ -7,5 +7,5 @@ int
 main(int argc, char **argv)
 {
         forth_reset();
-        forth_run(argv[1], strlen(argv[1]));
+        return (forth_run(argv[1], strlen(argv[1])));
 }

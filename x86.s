@@ -21,6 +21,7 @@ forth_run:
 	pushl $EVALUATE
 	jmp EXECUTE
 2:	movl STACK,%esp
+	movl -4(%esp),%eax
 	popl %ebp
 	ret
 1:	.long 2b
