@@ -90,6 +90,13 @@ CODE C@
 	NEXT
 END-CODE
 
+CODE C!
+	popl %edi
+	popl %eax
+	stosb
+        NEXT
+END-CODE
+
 CODE !
 	popl %edi
 	popl %eax
@@ -499,27 +506,48 @@ END-CODE
   CREATE,
   ['] doCREATE CODE,
   POSTPONE EXIT
+  LAST !
 ;
 
 : ALLOT ( n -- ) UP +! ;
 
 : VARIABLE
-  CREATE 1 CELLS ALLOT ,
+  CREATE 1 CELLS ALLOT
 ;
 
 : [ 0 STATE ! ; IMMEDIATE
 : ] 1 STATE ! ;
 
 : :
-  CREATE,
+  CREATE, \ xt
   ['] ENTER CODE,
+  DUP 1 CELLS + 1+ \ xt addr
+  DUP C@ \ xt addr nameb
+  128 OR
+  SWAP C! \ xt \ mark as unfindable for now
+  LAST ! \ --
   ]
 ;
 
-: ; ( xt -- )
+: ; ( -- )
   POSTPONE EXIT
-  LAST !
+  LAST @ 1 CELLS + 1+
+  DUP C@
+  128 INVERT AND
+  SWAP C! \ mark as visible
   POSTPONE [
+; IMMEDIATE
+
+: IMMEDIATE
+  LAST @ ( xt )
+  1 CELLS + ( lenaddr )
+  DUP C@ ( lenaddr lenbyte )
+  128 OR
+  SWAP C!
+; IMMEDIATE
+
+: RECURSE
+  LAST @ XT> COMPILE,
 ; IMMEDIATE
 
 : >NUMBER ( addr len -- n )

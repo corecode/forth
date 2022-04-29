@@ -6,7 +6,8 @@
 
 .GLOBAL forth_reset
 forth_reset:
-	movl $dataspace,UP_data
+	movl 4(%esp),%eax
+	movl %eax,UP_data
 	movl $corewords,LAST_data
 	ret
 
@@ -31,7 +32,5 @@ forth_run:
 RSTACK:
 	.fill 64,4,0
 RSTACK_end:
-dataspace:
-	.fill 256,4,0
 
 STACK:	.long 0
